@@ -1,0 +1,93 @@
+#!/bin/sh
+# Cloud LTE OS 包管理器 v3
+REPO="${DEEP_REPO:-https://furryhifurry.space/deep-repo}"
+DB=/var/lib/deep/packages
+CACHE=/var/cache/deep
+MUSL=/usr/lib/musl
+mkdir -p /var/lib/deep /var/cache/deep $MUSL 2>/dev/null
+
+usage() {
+    echo "Cloud LTE OS 包管理器 v3"
+    echo "用法: deep [install|remove|list|update|upgrade|search] [包名]"
+}
+
+fetch() { # fetch <url> <outfile>
+    curl -sL "$1" -o "$2" 2>/dev/null || wget -q "$1" -O "$2" 2>/dev/null
+}
+
+case "$1" in
+    update|refresh)
+        echo "获取包列表..."
+        PKGS=$(fetch "$REPO/packages/list" /tmp/avail_raw && cat /tmp/avail_raw)
+        if [ -z "$PKGS" ] || echo "$PKGS" | grep -q "404\|DOCTYPE"; then
+            echo "⚠️  无法连接仓库: $REPO"
+            exit 1
+        fi
+        echo "$PKGS" | grep -v "^#" | grep -v "^$" > /tmp/avail_pkgs
+        echo "✅ 已更新包列表 ($(wc -l < /tmp/avail_pkgs) 个包)"
+        ;;
+    list)
+        echo "已安装:"
+        [ -f "$DB" ] && cat "$DB" | awk '{print "  📦 " $1 " (" $2 ")"}' || echo "  (无)"
+        echo ""
+        echo "可用:"
+        [ -f /tmp/avail_pkgs ] && cat /tmp/avail_pkgs | awk '{print "  📦 " $1 " - " $2}' || echo "  (运行 deep update 刷新)"
+        ;;
+    search)
+        Q="$2"
+        [ -z "$Q" ] && { echo "用法: deep search <关键词>"; exit 1; }
+        echo "搜索: $Q"
+        grep -i "$Q" /tmp/avail_pkgs 2>/dev/null | awk '{print "  📦 " $1 " - " $2}' || echo "  未找到匹配的包"
+        ;;
+    install)
+        PKG="$2"
+        [ -z "$PKG" ] && { echo "用法: deep install <包名>"; exit 1; }
+        echo "下载 $PKG..."
+        mkdir -p $CACHE/$PKG
+        fetch "$REPO/packages/$PKG/$PKG" "$CACHE/$PKG/$PKG"
+        if [ ! -s "$CACHE/$PKG/$PKG" ]; then
+            echo "❌ 下载失败: $PKG"
+            exit 1
+        fi
+        chmod +x "$CACHE/$PKG/$PKG"
+        # curl 包结构特殊: bin/ 子目录
+        if [ "$PKG" = "curl" ]; then
+            fetch "$REPO/packages/$PKG/bin/curl" "$CACHE/$PKG/curl"
+            [ -s "$CACHE/$PKG/curl" ] && cp "$CACHE/$PKG/curl" /usr/bin/curl && chmod +x /usr/bin/curl
+            # 证书
+            mkdir -p /etc/ssl/certs
+            fetch "$REPO/packages/$PKG/etc/ssl/certs/ca-certificates.crt" "$CACHE/$PKG/cacert"
+            [ -s "$CACHE/$PKG/cacert" ] && cp "$CACHE/$PKG/cacert" /etc/ssl/certs/ca-certificates.crt
+        else
+            cp "$CACHE/$PKG/$PKG" /usr/bin/$PKG 2>/dev/null || cp "$CACHE/$PKG/$PKG" /bin/$PKG 2>/dev/null
+        fi
+        # 如果有 musl 依赖库, 一起下载安装
+        if fetch "$REPO/packages/$PKG/lib/ld-musl-x86_64.so.1" "$CACHE/$PKG/ldmusl" 2>/dev/null && [ -s "$CACHE/$PKG/ldmusl" ]; then
+            mkdir -p $MUSL
+            cp "$CACHE/$PKG/ldmusl" $MUSL/ld-musl-x86_64.so.1 2>/dev/null
+            # 下载所有 lib/*
+            for lib in libcrypto.so.3 libpcap.so.1 libncursesw.so.6 libreadline.so.8 libz.so.1 libssl.so.3 libcurl.so.4 libnghttp2.so.14 libbrotlidec.so.1 libbrotlicommon.so.1 libcares.so.2 libidn2.so.0 libunistring.so.5 libpsl.so.5 libzstd.so.1; do
+                fetch "$REPO/packages/$PKG/lib/$lib" "$CACHE/$PKG/$lib" 2>/dev/null
+                [ -s "$CACHE/$PKG/$lib" ] && cp "$CACHE/$PKG/$lib" $MUSL/ 2>/dev/null
+            done
+            echo "  ✅ musl 运行库已安装"
+        fi
+        echo "$PKG $(date)" >> "$DB"
+        sort -u "$DB" -o "$DB"
+        echo "✅ 安装完成: $PKG"
+        ;;
+    remove)
+        PKG="$2"
+        [ -z "$PKG" ] && { echo "用法: deep remove <包名>"; exit 1; }
+        rm -f /usr/bin/$PKG /bin/$PKG 2>/dev/null
+        grep -v "^$PKG " "$DB" > "${DB}.tmp" 2>/dev/null && mv "${DB}.tmp" "$DB"
+        echo "✅ 已移除: $PKG"
+        ;;
+    upgrade)
+        echo "检查更新..."
+        VER=$(fetch "$REPO/cloudlte/version" /tmp/ver && cat /tmp/ver)
+        echo "最新版本: ${VER:-unknown}"
+        echo "下载新镜像: $REPO/cloudlte/cloudlte_latest.img"
+        ;;
+    *) usage ;;
+esac

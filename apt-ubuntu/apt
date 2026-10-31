@@ -1,0 +1,65 @@
+#!/bin/sh
+# ============================================================
+# apt — Cloud LTE OS apt 包管理器 (Ubuntu chroot 封装)
+# ============================================================
+# 原理: Cloud LTE OS 是 musl 轻量系统, apt 需要 glibc 环境
+#       → 内置 Ubuntu rootfs, 本命令自动 chroot 执行 apt
+#
+# 与 deep 共存:
+#   deep  → 管理 Cloud LTE OS 原生静态包 (轻量, 常驻系统)
+#   apt   → 管理 Ubuntu 生态软件 (完整, 在 chroot 里)
+#
+# 首次使用会自动挂载 dev/proc/sys 并初始化
+# ============================================================
+
+UBUNTU_ROOT=/opt/ubuntu-rootfs
+
+# ===== 挂载 chroot 所需文件系统 =====
+mount_chroot() {
+    [ -d "$UBUNTU_ROOT" ] || { echo "❌ 未找到 Ubuntu rootfs ($UBUNTU_ROOT)"; echo "   请先安装 ubuntu-base 包"; exit 1; }
+    mountpoint -q "$UBUNTU_ROOT/dev"  2>/dev/null || mount --bind /dev "$UBUNTU_ROOT/dev"   2>/dev/null
+    mountpoint -q "$UBUNTU_ROOT/proc" 2>/dev/null || mount --bind /proc "$UBUNTU_ROOT/proc" 2>/dev/null
+    mountpoint -q "$UBUNTU_ROOT/sys"  2>/dev/null || mount --bind /sys "$UBUNTU_ROOT/sys"   2>/dev/null
+    # DNS
+    [ -f "$UBUNTU_ROOT/etc/resolv.conf" ] || echo "nameserver 223.5.5.5" > "$UBUNTU_ROOT/etc/resolv.conf"
+}
+
+# ===== 卸载 =====
+umount_chroot() {
+    umount "$UBUNTU_ROOT/dev" "$UBUNTU_ROOT/proc" "$UBUNTU_ROOT/sys" 2>/dev/null
+}
+
+case "$1" in
+    # 特殊命令: chroot 进入 Ubuntu 环境
+    shell|chroot)
+        mount_chroot
+        echo "☁️ 进入 Ubuntu chroot (输入 exit 退出)"
+        chroot "$UBUNTU_ROOT" /bin/bash
+        umount_chroot
+        ;;
+    mount)
+        mount_chroot
+        echo "✅ Ubuntu chroot 已挂载"
+        ;;
+    umount)
+        umount_chroot
+        echo "✅ Ubuntu chroot 已卸载"
+        ;;
+    status)
+        if [ -d "$UBUNTU_ROOT" ]; then
+            echo "Ubuntu rootfs: ✅ $UBUNTU_ROOT"
+            [ -x "$UBUNTU_ROOT/usr/bin/apt" ] && echo "apt: ✅ 可用" || echo "apt: ❌ 缺失"
+        else
+            echo "Ubuntu rootfs: ❌ 未安装"
+        fi
+        echo "deep 管理器: ✅ (独立, 不受影响)"
+        ;;
+    *)
+        # 普通 apt 参数透传
+        mount_chroot
+        chroot "$UBUNTU_ROOT" /usr/bin/apt-get "$@"
+        code=$?
+        umount_chroot
+        exit $code
+        ;;
+esac

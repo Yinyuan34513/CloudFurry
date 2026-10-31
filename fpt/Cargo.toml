@@ -1,0 +1,17 @@
+[workspace]
+
+[package]
+name = "fpt"
+version = "0.1.0"
+edition = "2021"
+description = "CloudFurry Linux package manager — fully git-repo based"
+
+[[bin]]
+name = "fpt"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
