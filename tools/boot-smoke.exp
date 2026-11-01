@@ -3,16 +3,6 @@
 set timeout 180
 log_file -a /home/yin/gc/CloudFurry/tools/boot-smoke.log
 spawn qemu-system-x86_64 -L /persistent/home/yin/qemu/pc-bios -machine q35 -enable-kvm -cpu host -m 2G -smp 2 -cdrom /tmp/linux_distro/cloudfurry-1.0-x86_64.iso -no-reboot -nographic
-expect {
-    -re {\|\s+([0-9]+) \+ ([0-9]+) = \?} {
-        set ans [expr {$expect_out(1,string) + $expect_out(2,string)}]
-    }
-    -re {\|\s+([0-9]+) \- ([0-9]+) = \?} {
-        set ans [expr {$expect_out(1,string) - $expect_out(2,string)}]
-    }
-    timeout { puts "GATE_TIMEOUT"; exit 1 }
-}
-send "$ans\r"
 expect "cloudfurry login:"
 set timeout 30
 send "root\r"
