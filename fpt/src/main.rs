@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// 官方源（在包管理器内定义）
-const OFFICIAL_REPO: &str = "https://github.com/Real-GNOS/furrypkgs.git";
+const OFFICIAL_REPO: &str = "https://github.com/Yinyuan34513/furrypkgs.git";
 const CACHE_DIR: &str = "/var/cache/fpt";
 
 /// 开发/测试时可用 FPT_CACHE 重定向缓存与状态目录

@@ -1,0 +1,36 @@
+#!/usr/bin/expect -f
+# CloudFurry ISO 冒烟测试：登录后检查 overlay/可写性/失败服务清单
+set timeout 180
+log_file -a /home/yin/gc/CloudFurry/tools/boot-smoke.log
+spawn qemu-system-x86_64 -L /persistent/home/yin/qemu/pc-bios -machine q35 -enable-kvm -cpu host -m 2G -smp 2 -cdrom /tmp/linux_distro/cloudfurry-1.0-x86_64.iso -no-reboot -nographic
+expect {
+    -re {\|\s+([0-9]+) \+ ([0-9]+) = \?} {
+        set ans [expr {$expect_out(1,string) + $expect_out(2,string)}]
+    }
+    -re {\|\s+([0-9]+) \- ([0-9]+) = \?} {
+        set ans [expr {$expect_out(1,string) - $expect_out(2,string)}]
+    }
+    timeout { puts "GATE_TIMEOUT"; exit 1 }
+}
+send "$ans\r"
+expect "cloudfurry login:"
+set timeout 30
+send "root\r"
+expect "Password:"
+send "123456\r"
+set timeout 60
+expect -re {bash-5\.2#}
+send "mount | grep -c overlay; touch /rwtest && echo RW_OK; rm /rwtest\r"
+expect -re {bash-5\.2#}
+send "systemctl --failed --no-legend 2>/dev/null | head -12; echo SVC_END\r"
+expect {
+    "SVC_END" {}
+    timeout { puts "SVC_TIMEOUT"; exit 1 }
+}
+expect -re {bash-5\.2#}
+send "systemctl is-system-running; echo SYS_END\r"
+expect -re {SYS_END}
+expect -re {bash-5\.2#}
+puts "SMOKE_COMPLETE"
+send "\001x"
+expect eof

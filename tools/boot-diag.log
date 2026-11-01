@@ -1,0 +1,150 @@
+spawn qemu-system-x86_64 -L /persistent/home/yin/qemu/pc-bios -machine q35 -enable-kvm -cpu host -m 2G -smp 2 -cdrom /tmp/linux_distro/cloudfurry-1.0-x86_64.iso -no-reboot -nographic
+c[?7l[2J[0mSeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
+
+
+iPXE (http://ipxe.org) 00:02.0 CA00 PCI2.10 PnP PMM+7EFD1C20+7EF31C20 CA00
+Press Ctrl-B to configure iPXE (PCI 00:02.0)...                                                                               
+
+
+Booting from Hard Disk...
+Boot failed: could not read the boot disk
+
+Booting from DVD/CD...
+[0;30;47mWelcome to GRUB![01;01H[0m[2J[02;25HGNU GRUB  version 2.12-7deepin14[04;02H┌────────────────────────────────────────────────────────────────────────────┐[05;02H│[05;79H│[06;02H│[06;79H│[07;02H│[07;79H│[08;02H│[08;79H│[09;02H│[09;79H│[10;02H│[10;79H│[11;02H│[11;79H│[12;02H│[12;79H│[13;02H│[13;79H│[14;02H│[14;79H│[15;02H│[15;79H│[16;02H│[16;79H│[17;02H│[17;79H│[18;02H└────────────────────────────────────────────────────────────────────────────┘[20;02H     Use the ↑ and ↓ keys to select which entry is highlighted.          
+      Press enter to boot the selected OS, `e' to edit the commands       
+      before booting or `c' for a command-line.                           [05;80H [05;03H[0;30;47m*? CloudFurry Linux 1.0 (x86-64) ? kernel 7.8.91                            [06;03H[0m CloudFurry Linux - ????                                                    [07;03H CloudFurry Linux - ???? (??? stage2)                    [07;59H[07;60H                   [08;03H                                                                            [09;03H                                                                            [10;03H                                                                            [11;03H                                                                            [12;03H                                                                            [13;03H                                                                            [14;03H                                                                            [15;03H                                                                            [16;03H                                                                            [17;03H                                                                            [17;80H 
+
+
+
+
+
+   The highlighted entry will be executed automatically in 5s.                 [05;78H
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   The highlighted entry will be executed automatically in 4s.                 [05;78H
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   The highlighted entry will be executed automatically in 3s.                 [05;78H
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   The highlighted entry will be executed automatically in 2s.                 [05;78H
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   The highlighted entry will be executed automatically in 1s.                 [05;78H
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   The highlighted entry will be executed automatically in 0s.                 [01;01H[2J[2J  Booting `? CloudFurry Linux 1.0 (x86-64) ? kernel 7.8.91'
+
+
+==============================================
+|   BOOT ACCESS GATE -- answer to continue   |
+==============================================
+|   2 + 8 = ?   Your answer (hidden): 
+Access granted -- continuing boot.
+
+  [ OK ] stage2 rootfs (squashfs) @ /dev/sr0
+  >>> Entering stage 2 (systemd) <<<
+switch_root: failed to unlink mnt: Directory not empty
+[!p]104[?7h[[0;1;31mFAILED[0m] Failed to start [0;1;39msystemd-logind.service[0m.
+[[0;1;31mFAILED[0m] Failed to start [0;1;39msystemd-logind.service[0m.
+[[0;1;31mFAILED[0m] Failed to start [0;1;39msystemd-logind.service[0m.
+[[0;1;31mFAILED[0m] Failed to start [0;1;39msystemd-logind.service[0m.
+[[0;1;31mFAILED[0m] Failed to start [0;1;39msystemd-logind.service[0m.
+[[0;1;31mFAILED[0m] Failed to start [0;1;39msystemd-logind.service[0m.
+[!p]104[?7h[6n[32766;32766H[6n[!p]104[?7h[6n[32766;32766H[6n
+CloudFurry Linux 1.0 (x86-64)
+Kernel 7.8.91 on an x86_64 (ttyS0)
+
+cloudfurry login: root
+Password: 
+-bash: /lib64/libtinfo.so.6: no version information available (required by -bash)
+-bash-5.2# <passwd; ls -la /etc/dbus-1/ 2>&1 | head -4; echo D1
+systemctl status systemd-tmpfiles-setup.service --no-pager -l 2>&1 | tail -8; echo D2
+total 0
+drwxr-xr-x 1 1001 1001 80 Nov  1 03:05 .
+drwxrwxr-x 1 1001 1001 60 Nov  1 03:05 ..
+drwxrwxr-x 1 1001 1001 60 Nov  1 03:05 lib
+drwxr-xr-x 1 1001 1001 60 Nov  1 03:05 run
+messagebus:x:101:102:System Message Bus:/nonexistent:/usr/sbin/nologin
+total 2
+drwxrwxr-x 3 1001 1001   50 Nov  1 04:50 .
+drwxrwxr-x 1 1001 1001  420 Nov  1 04:52 ..
+-rw-rw-r-- 1 1001 1001 1463 Nov  1 04:50 system.conf
+D1
+-bash-5.2# QEMU: Terminated
+

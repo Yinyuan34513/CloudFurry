@@ -7,6 +7,15 @@ mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 mount -t tmpfs none /tmp
 
+# 特殊文件系统预挂载：switch_root 后 mount(2) 会被内核拒绝 (EPERM)，
+# 必须在 initramfs 阶段完成，随后随 /dev 与 /sys 的 mount --move 一并移交 stage2，
+# systemd 的对应 .mount 单元检测到已挂载即标记 active
+mkdir -p /dev/hugepages /dev/mqueue /sys/kernel/debug /sys/kernel/tracing
+mount -t hugetlbfs none /dev/hugepages 2>/dev/null
+mount -t mqueue mqueue /dev/mqueue 2>/dev/null
+mount -t debugfs none /sys/kernel/debug 2>/dev/null
+mount -t tracefs none /sys/kernel/tracing 2>/dev/null
+
 # 确保关键目录存在
 mkdir -p /proc /sys /dev /tmp /root /etc /usr/bin /var/log /var/cache/fpt
 
@@ -14,6 +23,57 @@ mkdir -p /proc /sys /dev /tmp /root /etc /usr/bin /var/log /var/cache/fpt
 for tty in /dev/ttyS0 /dev/tty1 /dev/console; do
     [ -c "$tty" ] && exec < "$tty" > "$tty" 2>&1 && break
 done
+
+# ===== Stage 2: switch_root 到完整 rootfs（systemd + 源码构建包）=====
+switch_stage2() {
+    # 1) squashfs 内置于 ISO（grub 循环设备 / 光驱）
+    for dev in /dev/sr0 /dev/sda1 /dev/vda1 /dev/nvme0n1p1; do
+        [ -b "$dev" ] || continue
+        mkdir -p /mnt/iso
+        mount -o ro "$dev" /mnt/iso 2>/dev/null || continue
+        if [ -f /mnt/iso/stage2.squashfs ]; then
+            # upper/work 必须在独立 tmpfs 上：switch_root 会清空 initramfs 根
+            mkdir -p /mnt/rw /mnt/stage2 /mnt/combined
+            mount -t tmpfs tmpfs /mnt/rw && mkdir -p /mnt/rw/upper /mnt/rw/work
+            mount -t squashfs -o ro,loop /mnt/iso/stage2.squashfs /mnt/stage2 && {
+                echo "  [ OK ] stage2 rootfs (squashfs) @ $dev"
+                # overlay: squashfs(RO) + tmpfs(RW) → 可写根，systemd 正常启动
+                if mount -t overlay overlay \
+                    -o lowerdir=/mnt/stage2,upperdir=/mnt/rw/upper,workdir=/mnt/rw/work \
+                    /mnt/combined 2>/dev/null; then
+                    return 0
+                fi
+                echo "  [WARN] overlayfs 不可用, 回退只读根"
+                return 0
+            }
+        fi
+        umount /mnt/iso 2>/dev/null
+    done
+    # 2) 数据分区（ext4 p2）上的完整 rootfs
+    for dev in /dev/sda2 /dev/vda2 /dev/nvme0n1p2 /dev/mmcblk0p2; do
+        [ -b "$dev" ] || continue
+        mkdir -p /mnt/stage2
+        mount "$dev" /mnt/stage2 2>/dev/null || continue
+        if [ -x /mnt/stage2/sbin/init ]; then
+            echo "  [ OK ] stage2 rootfs @ $dev"
+            return 0
+        fi
+        umount /mnt/stage2 2>/dev/null
+    done
+    return 1
+}
+if switch_stage2; then
+    echo "  >>> Entering stage 2 (systemd) <<<"
+    # 挂载点移交 stage2（overlay 合成根或只读 squashfs 根）
+    ST2=/mnt/combined
+    [ -d "$ST2/usr" ] || ST2=/mnt/stage2
+    mount --move /proc  "$ST2/proc"  2>/dev/null || (mkdir -p "$ST2/proc" && mount -t proc none "$ST2/proc")
+    mount --move /sys   "$ST2/sys"   2>/dev/null || (mkdir -p "$ST2/sys" && mount -t sysfs none "$ST2/sys")
+    mount --move /dev   "$ST2/dev"   2>/dev/null || (mkdir -p "$ST2/dev" && mount -t devtmpfs none "$ST2/dev")
+    mount --move /tmp   "$ST2/tmp"   2>/dev/null || (mkdir -p "$ST2/tmp" && mount -t tmpfs none "$ST2/tmp")
+    exec switch_root "$ST2" /sbin/init
+fi
+echo "  [WARN] stage2 rootfs 不可用, 退回 initramfs 模式"
 
 # ===== 系统稳定性 =====
 # 1. swap 文件 (64MB, 防止 OOM) - 放 /tmp (tmpfs)

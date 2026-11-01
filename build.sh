@@ -1,63 +1,38 @@
 #!/bin/bash
-# Cloud LTE OS v8.1 自动构建脚本
-# 内核 7.1.5 + WiFi + TUI Dashboard + Package Manager
+# CloudFurry Linux 1.0 自动构建脚本
+# 内核 7.8.91（本地源码树，含 XAPI 补丁）+ glibc/base + fpt + systemd stage2 + ISO
 
 set -e
-DIR=/tmp/cloudlte-build
-KERNEL_SRC=https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.1.5.tar.xz
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR=/tmp/cloudfurry-build
+KERNEL_TREE=${KERNEL_TREE:-/home/yin/Downloads/linux-7.3.1/linux-7.3.1}
+KERNEL_VER=7.8.91
 DISTRO_DIR=/tmp/linux_distro
 INITRAMFS_DIR=$DISTRO_DIR/initramfs
 PKG_DIR=/tmp/deep-repo
+STAGE2=${STAGE2:-/home/yin/rootfs}
+ROOTPW=${ROOTPW:-123456}
 
-echo "=== ☁️ Cloud LTE OS v8.1 Build ==="
+echo "=== ☁️ CloudFurry Linux 1.0 Build ==="
 mkdir -p $DIR $DISTRO_DIR
 
-# 1. 下载内核源码
-echo "[1/6] 下载内核源码..."
-[ -f $DIR/linux-7.1.5.tar.xz ] || curl -L -o $DIR/linux-7.1.5.tar.xz $KERNEL_SRC
-[ -d $DIR/linux-7.1.5 ] || (cd $DIR && tar xf linux-7.1.5.tar.xz)
-
-# 2. 配置内核（启用 WiFi 支持）
-echo "[2/6] 配置内核 (WiFi enabled)..."
-cd $DIR/linux-7.1.5
-if [ ! -f .config ]; then
-    make defconfig
-    # WiFi 支持
-    ./scripts/config -e CONFIG_WLAN
-    ./scripts/config -e CONFIG_WIRELESS
-    ./scripts/config -e CONFIG_CFG80211
-    ./scripts/config -e CONFIG_MAC80211
-    ./scripts/config -e CONFIG_MAC80211_RC_DEFAULT_MINSTREL
-    # 常见 WiFi 驱动
-    ./scripts/config -e CONFIG_ATH_COMMON
-    ./scripts/config -e CONFIG_ATH9K
-    ./scripts/config -e CONFIG_ATH9K_HTC
-    ./scripts/config -e CONFIG_ATH10K
-    ./scripts/config -e CONFIG_ATH10K_PCI
-    ./scripts/config -e CONFIG_BRCMFMAC
-    ./scripts/config -e CONFIG_BRCMFMAC_PCIE
-    ./scripts/config -e CONFIG_IWLWIFI
-    ./scripts/config -e CONFIG_IWLDVM
-    ./scripts/config -e CONFIG_IWLMVM
-    ./scripts/config -e CONFIG_RTLWIFI
-    ./scripts/config -e CONFIG_RTL8XXXU
-    ./scripts/config -e CONFIG_MT7921E
-    ./scripts/config -e CONFIG_RT2X00
-    ./scripts/config -e CONFIG_RT2800USB
-    # 压缩 initramfs
-    ./scripts/config -e CONFIG_KERNEL_GZIP
-    # 网桥/路由 (可选)
-    ./scripts/config -e CONFIG_BRIDGE
-    ./scripts/config -e CONFIG_NETFILTER
-    ./scripts/config -e CONFIG_IP_NF_FILTER
-    ./scripts/config -e CONFIG_NETFILTER_XT_MATCH_STATE
+# 1. 内核：使用本地 7.8.91 源码树（KERNEL_TREE 可覆盖）
+echo "[1/6] 内核 $KERNEL_VER (本地树: $KERNEL_TREE)..."
+if [ ! -f "$KERNEL_TREE/arch/x86/boot/bzImage" ]; then
+    echo "  本地树无 bzImage, 编译中..."
+    (cd "$KERNEL_TREE" && make -j$(nproc) bzImage 2>&1 | tail -3)
 fi
-echo "  编译内核..."
-make -j$(nproc) bzImage 2>&1 | tail -3
-cp arch/x86/boot/bzImage $DISTRO_DIR/
+cp "$KERNEL_TREE/arch/x86/boot/bzImage" $DISTRO_DIR/vmlinuz-$KERNEL_VER
+
+# 2. stage2 rootfs（源码构建 glibc/bash/coreutils/util-linux/systemd）
+echo "[2/6] stage2 rootfs (源码构建)..."
+if [ ! -f "$STAGE2/.systemd-done" ]; then
+    (cd "$(dirname "$0")" && STAGE2="$STAGE2" ROOTPW="$ROOTPW" bash stage2/src-build.sh 2>&1 | tail -5)
+fi
 
 # 3. 编译 Dropbear (SSH)
 echo "[3/6] 编译 Dropbear..."
+mkdir -p $INITRAMFS_DIR/bin $INITRAMFS_DIR/usr/bin
 cd $DIR
 [ -d dropbear-2024.85 ] || (curl -L https://matt.ucc.asn.au/dropbear/releases/dropbear-2024.85.tar.bz2 | tar xj)
 cd dropbear-2024.85
@@ -68,7 +43,11 @@ cp dropbearmulti $INITRAMFS_DIR/bin/
 # 4. 组装 initramfs（glibc + coreutils + bash 用户态）
 echo "[4/6] 配置 initramfs (glibc base)..."
 mkdir -p $INITRAMFS_DIR/{bin,usr/bin,usr/sbin,lib,lib64,etc,var/log,var/cache/fpt} \
-         $INITRAMFS_DIR/usr/share/udhcpc $INITRAMFS_DIR/www
+         $INITRAMFS_DIR/usr/share/udhcpc $INITRAMFS_DIR/www \
+         $INITRAMFS_DIR/proc $INITRAMFS_DIR/sys $INITRAMFS_DIR/dev \
+         $INITRAMFS_DIR/tmp $INITRAMFS_DIR/root $INITRAMFS_DIR/run \
+         $INITRAMFS_DIR/mnt/iso $INITRAMFS_DIR/mnt/stage2
+chmod 1777 $INITRAMFS_DIR/tmp
 
 # --- glibc 动态基座: 从宿主机复制 bash / coreutils / util-linux / git ---
 copy_bin() { # copy_bin <abs-or-PATH-bin> <destdir>
@@ -87,11 +66,11 @@ copy_libs() { # copy_libs <binary>: 按需复制动态库
 for b in bash ls cp mv rm cat echo mkdir rmdir ln chmod chown dd df grep sed awk \
          mount umount swapon mkswap tar gzip find printf sleep clear uname ps \
          hostname id true false test sync head tail wc tr cut sort uniq tee less \
-         agetty login; do
+         agetty login switch_root; do
     copy_bin "$b" $INITRAMFS_DIR/bin
 done
 # agetty 需要的额外运行时（libpam/login 相关），login 依赖 pam 库
-for b in $INITRAMFS_DIR/bin/agetty $INITRAMFS_DIR/bin/login; do
+for b in $INITRAMFS_DIR/bin/agetty $INITRAMFS_DIR/bin/login $INITRAMFS_DIR/bin/switch_root; do
     [ -f "$b" ] && copy_libs "$b"
 done
 # git（fpt 的下载方式完全基于 git 仓库）
@@ -113,9 +92,9 @@ done
 [ -f $PKG_DIR/packages/wpa_passphrase/wpa_passphrase ] && cp $PKG_DIR/packages/wpa_passphrase/wpa_passphrase $INITRAMFS_DIR/usr/bin/wpa_passphrase
 
 # 安装脚本到 initramfs
-cp init.sh $INITRAMFS_DIR/init
+cp "$SCRIPT_DIR/init.sh" $INITRAMFS_DIR/init
 chmod +x $INITRAMFS_DIR/init
-cp menu.sh $INITRAMFS_DIR/usr/bin/menu 2>/dev/null || true
+cp "$SCRIPT_DIR/menu.sh" $INITRAMFS_DIR/usr/bin/menu 2>/dev/null || true
 # fpt 包管理器（Rust, glibc 目标）替代 deep
 if [ -f fpt/target/release/fpt ]; then
     cp fpt/target/release/fpt $INITRAMFS_DIR/bin/fpt
@@ -129,75 +108,42 @@ echo "[5/6] 打包 initramfs..."
 cd $INITRAMFS_DIR
 find . | cpio -H newc -o 2>/dev/null | gzip > $DISTRO_DIR/initramfs.gz
 
-# 6. 构建 UEFI 镜像
-echo "[6/6] 构建 UEFI 镜像 (64MB)..."
-cd $DISTRO_DIR
-IMG=cloudlte_uefi.img
-rm -f $IMG
-echo "  构建 512MB 镜像 (128MB EFI + 384MB 数据分区)..."
-dd if=/dev/zero of=$IMG bs=1M count=512 2>/dev/null
-parted -s $IMG mklabel gpt 2>/dev/null
-parted -s $IMG mkpart primary fat32 1MiB 129MiB 2>/dev/null
-parted -s $IMG set 1 esp on 2>/dev/null
-parted -s $IMG mkpart primary ext4 129MiB 511MiB 2>/dev/null
+# 6. 制作 ISO（stage2 rootfs 以 squashfs 内置，stage1 引导后 switch_root）
+echo "[6/6] 制作 ISO..."
+echo "  打包 stage2 rootfs (squashfs)..."
+mksquashfs $STAGE2 $DISTRO_DIR/stage2.squashfs -noappend -comp zstd >/dev/null 2>&1
 
-LOOP=$(losetup -Pf --show $IMG 2>/dev/null)
-mkfs.vfat -F32 -n CLOUDLTE ${LOOP}p1 2>/dev/null
-mkfs.ext4 -L APTROOT ${LOOP}p2 2>/dev/null
-mount ${LOOP}p1 /mnt 2>/dev/null
-mkdir -p /mnt/EFI/BOOT /mnt/boot/grub
-grub-mkimage -o /mnt/EFI/BOOT/BOOTX64.EFI -O x86_64-efi -p /EFI/BOOT \
-  fat ext2 part_gpt normal boot linux configfile loopback search help 2>/dev/null
-cp $DISTRO_DIR/initramfs.gz /mnt/boot/initrd.img
-cp bzImage /mnt/boot/vmlinuz
-cat > /mnt/boot/grub/grub.cfg << 'GRUBEOF'
+ISODIR=/tmp/cloudfurry-iso
+rm -rf $ISODIR && mkdir -p $ISODIR/boot/grub $ISODIR/EFI/BOOT
+cp $DISTRO_DIR/vmlinuz-$KERNEL_VER $ISODIR/boot/vmlinuz
+cp $DISTRO_DIR/initramfs.gz $ISODIR/boot/initrd.img
+cp $DISTRO_DIR/stage2.squashfs $ISODIR/
+cat > $ISODIR/boot/grub/grub.cfg << GRUBEOF
 set timeout=5
 set default=0
-menuentry "☁️ Cloud LTE OS 7.1.5 (v8.1)" {
-    linux /boot/vmlinuz quiet
+menuentry "☁️ CloudFurry Linux 1.0 (x86-64) — kernel $KERNEL_VER" {
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200 quiet
     initrd /boot/initrd.img
 }
-menuentry "Cloud LTE OS - 救援模式" {
-    linux /boot/vmlinuz single
+menuentry "CloudFurry Linux - 详细日志" {
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200 loglevel=7
     initrd /boot/initrd.img
 }
-menuentry "Cloud LTE OS - 详细日志" {
-    linux /boot/vmlinuz loglevel=7
+menuentry "CloudFurry Linux - 救援模式 (不进入 stage2)" {
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200 single
     initrd /boot/initrd.img
 }
 GRUBEOF
-# 拷贝 apt 支持包到数据分区
-echo "[7/7] 拷贝 apt 支持到数据分区..."
-mkdir -p /mnt/data
-mount ${LOOP}p2 /mnt/data 2>/dev/null
-mkdir -p /mnt/data/apt
-if [ -f /tmp/cloudlte-apt-rootfs.tar.gz ]; then
-  cp /tmp/cloudlte-apt-rootfs.tar.gz /mnt/data/apt/ubuntu-rootfs.tar.gz
-elif [ -f apt-ubuntu/ubuntu-rootfs.tar.gz ]; then
-  cp apt-ubuntu/ubuntu-rootfs.tar.gz /mnt/data/apt/
-else
-  echo "⚠️  ubuntu-rootfs.tar.gz 未找到, apt 支持跳过"
-fi
-cp apt-ubuntu/apt /mnt/data/apt/ 2>/dev/null
-cp apt-ubuntu/install-apt.sh /mnt/data/apt/ 2>/dev/null
-chmod +x /mnt/data/apt/apt /mnt/data/apt/install-apt.sh 2>/dev/null
-ls -la /mnt/data/apt/ 2>/dev/null
-sync
-umount /mnt/data 2>/dev/null
-umount /mnt 2>/dev/null
-losetup -d $LOOP 2>/dev/null
-
-cp $IMG /root/.openclaw/workspace/cloudlte_v8.3.img
+ISO=cloudfurry-1.0-x86_64.iso
+grub-mkrescue -o $DISTRO_DIR/$ISO $ISODIR 2>/dev/null
 
 echo ""
 echo "======================"
-echo "  ☁️ 构建完成!"
+echo "  ☁️ CloudFurry Linux 1.0 构建完成!"
 echo "======================"
-echo "  v8.3 更新内容:"
-echo "  ✅ apt 包管理器 (Ubuntu chroot, 数据分区)"
-echo "  ✅ fpt 管理器 (Rust, git 仓库下载)"
-echo "  ✅ 512MB 镜像 (128MB EFI + 384MB 数据)"
-echo "  ✅ WiFi + TUI + Swap + Logrotate"
-echo ""
-echo "  镜像: /root/.openclaw/workspace/cloudlte_v8.3.img"
-ls -lh /root/.openclaw/workspace/cloudlte_v8.3.img
+echo "  ✅ ISO: $DISTRO_DIR/$ISO (可启动, stage2 squashfs 内置)"
+echo "  ✅ 内核: $KERNEL_VER (本地树, XAPI + 启动问答门)"
+echo "  ✅ stage2 rootfs: $STAGE2 (glibc/bash/coreutils/util-linux/systemd 源码构建)"
+echo "  ✅ root 密码: $ROOTPW"
+echo "  ✅ fpt 包管理器 (Rust, git 仓库: furrypkgs)"
+ls -lh $DISTRO_DIR/$ISO

@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+set timeout 180
+log_file -a /home/yin/gc/CloudFurry/tools/boot-diag.log
+spawn qemu-system-x86_64 -L /persistent/home/yin/qemu/pc-bios -machine q35 -enable-kvm -cpu host -m 2G -smp 2 -cdrom /tmp/linux_distro/cloudfurry-1.0-x86_64.iso -no-reboot -nographic
+expect {
+    -re {\|\s+([0-9]+) \+ ([0-9]+) = \?} { set ans [expr {$expect_out(1,string) + $expect_out(2,string)}] }
+    -re {\|\s+([0-9]+) \- ([0-9]+) = \?} { set ans [expr {$expect_out(1,string) - $expect_out(2,string)}] }
+    timeout { puts "GATE_TIMEOUT"; exit 1 }
+}
+send "$ans\r"
+expect "cloudfurry login:"
+set timeout 30
+send "root\r"
+expect "Password:"
+send "123456\r"
+set timeout 60
+expect -re {bash-5\.2#}
+send "ls -la /usr/var/ 2>&1 | head -8; grep messagebus /etc/passwd; ls -la /etc/dbus-1/ 2>&1 | head -4; echo D1\r"
+expect "D1"
+send "systemctl status systemd-tmpfiles-setup.service --no-pager -l 2>&1 | tail -8; echo D2\r"
+expect "D2"
+expect -re {bash-5\.2#}
+send "\001x"
+expect eof
